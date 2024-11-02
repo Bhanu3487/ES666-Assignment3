@@ -3,8 +3,8 @@ import numpy as np
 import glob
 import os
 
-class PanoramaStitcher:
-    def make_panorama_for_images_in(self, path):
+class PanaromaStitcher:
+    def make_panaroma_for_images_in(self, path):
         all_images = sorted(glob.glob(path + os.sep + '*'))
         images = [cv2.imread(img) for img in all_images]
 
