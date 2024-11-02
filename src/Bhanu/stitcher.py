@@ -3,8 +3,8 @@ import numpy as np
 import glob
 import os
 
-class PanaromaStitcher:
-    def make_panaroma_for_images_in(self, path):
+class PanoramaStitcher:
+    def make_panorama_for_images_in(self, path):
         all_images = sorted(glob.glob(path + os.sep + '*'))
         images = [cv2.imread(img) for img in all_images]
 
@@ -37,9 +37,8 @@ class PanaromaStitcher:
 
         # Homography calculation and left-side warping
         for i in range(anchor_index - 1, -1, -1):
-            detector = cv2.SIFT_create()
-            keypoints1, descriptors1 = detector.detectAndCompute(cylindrical_images[i], None)
-            keypoints2, descriptors2 = detector.detectAndCompute(cylindrical_images[i + 1], None)
+            keypoints1, descriptors1 = cv2.SIFT_create().detectAndCompute(cylindrical_images[i], None)
+            keypoints2, descriptors2 = cv2.SIFT_create().detectAndCompute(cylindrical_images[i + 1], None)
 
             bf = cv2.BFMatcher()
             matches = bf.knnMatch(descriptors1, descriptors2, k=2)
@@ -94,25 +93,94 @@ class PanaromaStitcher:
         height = int(max_y - min_y)
         output_size = (width, height)
 
-        panorama = cv2.warpPerspective(anchor_image, H_matrices[anchor_index], output_size)
+        panorama = self.warp_perspective(anchor_image, H_matrices[anchor_index], output_size)
 
         # Blend images into the panorama
         for i in range(len(cylindrical_images)):
             if i != anchor_index:
-                warped_image = cv2.warpPerspective(cylindrical_images[i], H_matrices[i], output_size)
+                warped_image = self.warp_perspective(cylindrical_images[i], H_matrices[i], output_size)
                 mask = (warped_image > 0).astype(np.float32)
                 panorama = (mask * warped_image + (1 - mask) * panorama).astype(panorama.dtype)
                 print(f"Warped image {i} shape: {warped_image.shape}")
 
         # Crop black borders
-        gray = cv2.cvtColor(panorama, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        gray = np.dot(panorama[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
+        thresh = (gray > 1).astype(np.uint8) * 255
+        
+        contours = []
+        height, width = thresh.shape
+        visited = np.zeros_like(thresh, dtype=bool)
+
+        for y in range(height):
+            for x in range(width):
+                if thresh[y, x] > 0 and not visited[y, x]:
+                    # Found a new contour
+                    contour = []
+                    self.trace_contour(thresh, visited, x, y, contour)
+                    contours.append(contour)
+
         if contours:
-            x, y, w, h = cv2.boundingRect(contours[0])
+            x, y, w, h = self.bounding_rect(contours[0])
             panorama = panorama[y:y+h, x:x+w]
 
         return panorama, H_matrices
+
+    def warp_perspective(self, image, H, output_size):
+        # Get the dimensions of the input image
+        h, w = image.shape[:2]
+
+        # Prepare the output image
+        output_image = np.zeros((output_size[1], output_size[0], 3), dtype=image.dtype)
+
+        # Generate the inverse homography matrix
+        H_inv = np.linalg.inv(H)
+
+        # Iterate over every pixel in the output image
+        for y in range(output_size[1]):
+            for x in range(output_size[0]):
+                # Create a homogeneous coordinate for the pixel
+                pixel = np.array([x, y, 1])
+
+                # Transform the pixel coordinate using the inverse homography matrix
+                transformed_pixel = H_inv @ pixel
+                transformed_pixel /= transformed_pixel[2]  # Normalize
+
+                src_x, src_y = int(transformed_pixel[0]), int(transformed_pixel[1])
+
+                # Check if the transformed pixel coordinates are within bounds of the input image
+                if 0 <= src_x < w and 0 <= src_y < h:
+                    output_image[y, x] = image[src_y, src_x]
+
+        return output_image
+
+    def trace_contour(self, binary_image, visited, start_x, start_y, contour):
+        # Trace a contour starting from (start_x, start_y)
+        height, width = binary_image.shape
+        stack = [(start_x, start_y)]
+        
+        while stack:
+            x, y = stack.pop()
+            if visited[y, x]:
+                continue
+            
+            visited[y, x] = True
+            contour.append((x, y))
+
+            # Check 8-connectivity
+            for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < width and 0 <= ny < height and binary_image[ny, nx] > 0 and not visited[ny, nx]:
+                    stack.append((nx, ny))
+
+    def bounding_rect(self, contour):
+        # Calculate the bounding rectangle of a contour
+        x_coords = [p[0] for p in contour]
+        y_coords = [p[1] for p in contour]
+        x = min(x_coords)
+        y = min(y_coords)
+        w = max(x_coords) - x
+        h = max(y_coords) - y
+        return x, y, w, h
 
     def homography_matrix(self, src_pts, dst_pts): 
         A = []
