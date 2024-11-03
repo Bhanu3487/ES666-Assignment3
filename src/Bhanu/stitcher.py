@@ -109,7 +109,7 @@ class PanaromaStitcher:
 
         return panorama, H_matrices
 
-        def create_cylindrical_images(self, images, f):
+    def create_cylindrical_images(self, images, f):
         cylindrical_images = []
         for img in images:
             h, w = img.shape[:2]
@@ -134,7 +134,6 @@ class PanaromaStitcher:
             cylindrical_images.append(cylindrical_img)
         return cylindrical_images
        
-
     def warp_perspective(self, image, H, output_size):
         # Get dimensions of the input image and prepare the output image
         h, w = image.shape[:2]
